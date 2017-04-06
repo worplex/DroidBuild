@@ -1,0 +1,3 @@
+[submodule "libparse"]
+	path = libparse
+	url = git@github.com:worplex/libparse.git
