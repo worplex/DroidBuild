@@ -2,7 +2,7 @@
 
 START
 
-add_library("testapp");
-//add_cpp_files("testapp","main.cpp");
+//Put build script here.
+
 
 END
