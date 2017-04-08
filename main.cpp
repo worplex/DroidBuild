@@ -3,6 +3,6 @@
 START
 
 add_library("testapp");
-add_cpp_files("testapp","src/main.cpp");
+add_cpp_files("testapp","main.cpp");
 
 END

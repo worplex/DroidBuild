@@ -63,6 +63,8 @@ namespace droidbuild {
   public:
     String name;
     std::vector<std::shared_ptr<Target>> dependencies;
+    std::string link_args;
+    
     Target(const String& name):name(name) {
       
     }
@@ -73,6 +75,7 @@ namespace droidbuild {
       for(size_t i = 0;i<dependencies.size();i++) {
 	dependencies[i]->build();
       }
+      _build();
     }
   protected:
     virtual void _build() = 0;
@@ -83,7 +86,17 @@ namespace droidbuild {
   }
   protected:
   void _build() {
+    std::stringstream link_args;
+    for(size_t i = 0;i<dependencies.size();i++) {
+      link_args<<dependencies[i]->link_args;
+    }
     
+    env["link_args"] = link_args.str();
+    env["target"] = name.val.c_str();
+    String cmd("$ANDROID_NDK$/toolchains/$platform$-4.9/prebuilt/linux-x86_64/bin/$platform$-g++ --shared --sysroot=$ANDROID_NDK$/toolchains/$platform$-4.9/prebuilt/linux-x86_64 -o $build_dir$/$target$.so $link_args$");
+    if(system(cmd.val.c_str())) {
+      exit(-6);
+    }
   }
   };
   
@@ -95,7 +108,12 @@ namespace droidbuild {
   protected:
   void _build() {
     env["filename"] = (std::string)name;
-    system(String("$ANDROID_NDK$/toolchains/$platform$-4.9/prebuilt/linux-x86_64/bin/$platform$ $filename$ -o $build_dir$/$filename$.o").val.data());
+    env["out_filename"] = String("$build_dir$/$filename$.o");
+    link_args = env["out_filename"];
+    String cmd("$ANDROID_NDK$/toolchains/$platform$-4.9/prebuilt/linux-x86_64/bin/$platform$-g++ -c --sysroot=$ANDROID_NDK$/toolchains/$platform$-4.9/prebuilt/linux-x86_64 $filename$ -o $out_filename$");
+    if(system(cmd.val.data())) {
+      exit(-5);
+    }
   }
   };
   
@@ -128,8 +146,8 @@ static int execbuild(int argc, char** argv) {
   toolchains.push_back("arm-linux-androideabi");
   toolchains.push_back("mips64el-linux-android");
   toolchains.push_back("mipsel-linux-android");
-  toolchains.push_back("x86_64");
-  toolchains.push_back("x86");
+  //toolchains.push_back("x86_64");
+  //toolchains.push_back("x86");
   
   std::mutex mtx;
   std::condition_variable evt;
@@ -159,7 +177,8 @@ static int execbuild(int argc, char** argv) {
 	printf("Building target %s for platform %s\n",bot->first.data(),toolchain.data());
 	mtx.unlock();
 	
-	
+	std::shared_ptr<Target> target = bot->second;
+	target->build();
 	
 	mtx.lock();
 	printf("Finished building target %s for platform %s\n",bot->first.data(),toolchain.data());
