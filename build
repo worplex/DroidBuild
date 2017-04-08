@@ -1,0 +1,3 @@
+cmake -G "Unix Makefiles"
+make -j32
+./DroidBuild
