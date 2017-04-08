@@ -18,6 +18,14 @@
 #include <assert.h>
 
 
+static std::mutex mtx;
+
+static void log_error(const char* error) {
+  mtx.lock();
+  printf("%s\n",error);
+  mtx.unlock();
+}
+
 thread_local std::map<std::string,std::string> env;
 
 
@@ -58,12 +66,15 @@ public:
 
 
 namespace droidbuild {
-
+class BuildState {
+public:
+  std::stringstream link_args;
+};
   class Target {
   public:
     String name;
     std::vector<std::shared_ptr<Target>> dependencies;
-    std::string link_args;
+    
     
     Target(const String& name):name(name) {
       
@@ -71,30 +82,28 @@ namespace droidbuild {
     void add_dependency(const std::shared_ptr<Target>& dep) {
       dependencies.push_back(dep);
     }
-    void build() {
+    void build(BuildState& state) {
       for(size_t i = 0;i<dependencies.size();i++) {
-	dependencies[i]->build();
+	dependencies[i]->build(state);
       }
-      _build();
+      _build(state);
     }
   protected:
-    virtual void _build() = 0;
+    virtual void _build(BuildState& state) = 0;
   };
   class LibraryTarget:public Target {
   public:
   LibraryTarget(const String& name):Target(name) {
   }
   protected:
-  void _build() {
-    std::stringstream link_args;
-    for(size_t i = 0;i<dependencies.size();i++) {
-      link_args<<dependencies[i]->link_args;
-    }
+  void _build(BuildState& state) {
     
-    env["link_args"] = link_args.str();
+    
+    env["link_args"] = state.link_args.str().data();
     env["target"] = name.val.c_str();
-    String cmd("$ANDROID_NDK$/toolchains/$platform$-4.9/prebuilt/linux-x86_64/bin/$platform$-g++ --shared --sysroot=$ANDROID_NDK$/toolchains/$platform$-4.9/prebuilt/linux-x86_64 -o $build_dir$/$target$.so $link_args$");
+    String cmd("$ANDROID_NDK$/toolchains/$platform$-4.9/prebuilt/linux-x86_64/bin/$platform$-g++ --shared --sysroot=$ANDROID_NDK$/platforms/android-21/arch-$arch$ -o $build_dir$/$target$.so $link_args$");
     if(system(cmd.val.c_str())) {
+      log_error(cmd.val.data());
       exit(-6);
     }
   }
@@ -106,10 +115,10 @@ namespace droidbuild {
   CppTarget(const String& name):Target(name) {
   }
   protected:
-  void _build() {
+  void _build(BuildState& state) {
     env["filename"] = (std::string)name;
     env["out_filename"] = String("$build_dir$/$filename$.o");
-    link_args = env["out_filename"];
+    state.link_args << env["out_filename"]<<" ";
     String cmd("$ANDROID_NDK$/toolchains/$platform$-4.9/prebuilt/linux-x86_64/bin/$platform$-g++ -c --sysroot=$ANDROID_NDK$/toolchains/$platform$-4.9/prebuilt/linux-x86_64 $filename$ -o $out_filename$");
     if(system(cmd.val.data())) {
       exit(-5);
@@ -146,10 +155,13 @@ static int execbuild(int argc, char** argv) {
   toolchains.push_back("arm-linux-androideabi");
   toolchains.push_back("mips64el-linux-android");
   toolchains.push_back("mipsel-linux-android");
-  //toolchains.push_back("x86_64");
-  //toolchains.push_back("x86");
+  std::map<std::string,std::string> toolchainToArchMappings; //For some stupid reason; Google can't even decide what it's architectures should be named....
+  toolchainToArchMappings["aarch64-linux-android"] = "arm64";
+  toolchainToArchMappings["arm-linux-androideabi"] = "arm";
+  toolchainToArchMappings["mips64el-linux-android"] = "mips64";
+  toolchainToArchMappings["mipsel-linux-android"] = "mips";
   
-  std::mutex mtx;
+  
   std::condition_variable evt;
   
   size_t pending = toolchains.size();
@@ -163,7 +175,7 @@ static int execbuild(int argc, char** argv) {
       toolchains.pop_back();
       
       mtx.unlock();
-      
+      env["arch"] = toolchainToArchMappings[toolchain];
       env["platform"] = toolchain;
       
       
@@ -178,7 +190,8 @@ static int execbuild(int argc, char** argv) {
 	mtx.unlock();
 	
 	std::shared_ptr<Target> target = bot->second;
-	target->build();
+	BuildState minnesota;
+	target->build(minnesota);
 	
 	mtx.lock();
 	printf("Finished building target %s for platform %s\n",bot->first.data(),toolchain.data());
